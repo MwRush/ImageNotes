@@ -20,6 +20,7 @@ let drag_depth = 0;
 function set_status(message, is_error = false) {
     elements.live_status.textContent = message;
     elements.live_status.classList.toggle('error', is_error);
+    elements.live_status.classList.toggle('visually_hidden', !is_error);
 }
 
 function clamp(value, minimum = 0, maximum = 1) {
@@ -34,20 +35,51 @@ function update_controls() {
     const has_draft = Boolean(draft);
     elements.comment_input.disabled = !has_draft || is_exporting;
     elements.save_button.disabled = !has_draft || !has_unsaved_text() || is_exporting;
-    elements.export_button.disabled = !annotations.length || has_draft || is_exporting;
+    elements.export_button.disabled = (!annotations.length && !has_unsaved_text()) || is_exporting;
     elements.replace_button.disabled = is_exporting;
     elements.point_button.disabled = is_exporting;
     elements.area_button.disabled = is_exporting;
     elements.cancel_button.disabled = is_exporting;
-    elements.cancel_button.hidden = !has_draft;
-    elements.comment_form.classList.toggle('active_form', has_draft);
-    elements.character_count.textContent = `${elements.comment_input.value.length.toLocaleString('fr-FR')} / 1 200`;
+    elements.comment_popover.hidden = !has_draft || Boolean(pointer_start);
+    elements.delete_draft_button.hidden = !editing_id;
     elements.composer_number.textContent = editing_id ? String(annotations.findIndex((item) => item.id === editing_id) + 1) : has_draft ? String(annotations.length + 1) : '+';
-    elements.comment_label.textContent = editing_id ? 'Modifier votre commentaire' : has_draft ? 'Que voulez-vous signaler ici ?' : 'Sélectionnez un endroit sur l’image';
-    elements.save_button.textContent = editing_id ? 'Enregistrer les modifications' : 'Ajouter le commentaire ↗';
-    elements.marker_count.textContent = `${annotations.length} repère${annotations.length > 1 ? 's' : ''}`;
-    elements.comment_count.textContent = String(annotations.length).padStart(2, '0');
-    elements.empty_comments.hidden = annotations.length > 0;
+    elements.comment_label.textContent = editing_id ? 'Modifier' : 'Commentaire';
+    elements.comment_count.textContent = String(annotations.length);
+    elements.comments_section.hidden = !annotations.length;
+    position_popover();
+}
+
+function position_popover() {
+    if (!draft || elements.comment_popover.hidden) return;
+    const viewport = window.visualViewport;
+    const viewport_left = viewport?.offsetLeft || 0;
+    const viewport_top = viewport?.offsetTop || 0;
+    const viewport_width = viewport?.width || window.innerWidth;
+    const viewport_height = viewport?.height || window.innerHeight;
+    elements.comment_popover.style.maxHeight = `${Math.max(120, viewport_height - 24)}px`;
+    const bounds = elements.image_surface.getBoundingClientRect();
+    const anchor_x = bounds.left + draft.x * bounds.width;
+    const anchor_y = bounds.top + draft.y * bounds.height;
+    const width = elements.comment_popover.offsetWidth;
+    const height = elements.comment_popover.offsetHeight;
+    const left = clamp(anchor_x - 22, viewport_left + 12, viewport_left + viewport_width - width - 12);
+    const below = anchor_y + 24;
+    const above = anchor_y - height - 24;
+    const top = below + height <= viewport_top + viewport_height - 12 ? below : above;
+    elements.comment_popover.style.left = `${left}px`;
+    elements.comment_popover.style.top = `${clamp(top, viewport_top + 12, viewport_top + viewport_height - height - 12)}px`;
+}
+
+function resize_comment_input() {
+    elements.comment_input.style.height = 'auto';
+    elements.comment_input.style.height = `${Math.min(160, elements.comment_input.scrollHeight)}px`;
+    position_popover();
+}
+
+function focus_comment_input() {
+    resize_comment_input();
+    elements.comment_input.focus({ preventScroll: true });
+    requestAnimationFrame(position_popover);
 }
 
 function position_marker(element, annotation) {
@@ -63,6 +95,7 @@ function render_draft() {
     if (draft) {
         position_marker(elements.draft_marker, draft);
         elements.draft_marker.firstElementChild.textContent = editing_id ? String(annotations.findIndex((item) => item.id === editing_id) + 1) : String(annotations.length + 1);
+        position_popover();
     }
 }
 
@@ -82,19 +115,18 @@ function render_annotations() {
         badge.textContent = String(index + 1);
         marker.append(badge);
         position_marker(marker, annotation);
-        marker.addEventListener('click', () => select_annotation(annotation.id, 'comment'));
+        marker.addEventListener('click', () => edit_annotation(annotation.id));
         marker.disabled = is_exporting;
         elements.marker_layer.append(marker);
         const row = elements.comment_template.content.firstElementChild.cloneNode(true);
         row.id = `comment_${annotation.id}`;
         row.classList.toggle('selected_row', annotation.id === selected_id);
         row.querySelector('.number_badge').textContent = String(index + 1);
-        row.querySelector('.comment_type').textContent = annotation.type === 'area' ? 'Zone sélectionnée' : 'Point précis';
         row.querySelector('.comment_text').textContent = annotation.text;
         const location_button = row.querySelector('.comment_location');
-        location_button.setAttribute('aria-label', `Voir le repère ${index + 1} sur l’image`);
-        location_button.addEventListener('click', () => select_annotation(annotation.id, 'image'));
-        row.querySelector('.edit_button').addEventListener('click', () => edit_annotation(annotation.id));
+        location_button.setAttribute('aria-label', `Modifier le commentaire ${index + 1}`);
+        location_button.addEventListener('click', () => edit_annotation(annotation.id, true));
+        row.querySelector('.edit_button').addEventListener('click', () => edit_annotation(annotation.id, true));
         row.querySelector('.delete_button').addEventListener('click', () => delete_annotation(annotation.id));
         row.querySelectorAll('button').forEach((button) => { button.disabled = is_exporting; });
         elements.comments_list.append(row);
@@ -102,44 +134,37 @@ function render_annotations() {
     update_controls();
 }
 
-function select_annotation(id, destination) {
-    if (is_exporting) return;
-    selected_id = id;
-    elements.marker_layer.querySelectorAll('.annotation_marker').forEach((marker) => marker.classList.toggle('selected_marker', Number(marker.dataset.annotation_id) === id));
-    elements.comments_list.querySelectorAll('.comment_row').forEach((row) => row.classList.toggle('selected_row', row.id === `comment_${id}`));
-    const target = destination === 'image' ? elements.image_surface : document.getElementById(`comment_${id}`);
-    target.scrollIntoView({ block: 'nearest' });
-}
-
 function cancel_draft() {
     draft = null;
     editing_id = null;
     pointer_start = null;
+    selected_id = null;
     elements.comment_input.value = '';
+    elements.marker_layer.querySelectorAll('.selected_marker').forEach((marker) => marker.classList.remove('selected_marker'));
+    elements.comments_list.querySelectorAll('.selected_row').forEach((row) => row.classList.remove('selected_row'));
     render_draft();
     update_controls();
 }
 
-function edit_annotation(id) {
+function edit_annotation(id, reveal = false) {
     if (is_exporting) return;
-    if (draft && has_unsaved_text() && editing_id !== id) {
-        set_status('Enregistrez ou annulez le commentaire en cours avant d’en modifier un autre.', true);
-        elements.comment_input.focus();
-        return;
-    }
+    finish_draft();
     const annotation = annotations.find((item) => item.id === id);
+    if (!annotation) return;
+    if (reveal) elements.image_surface.scrollIntoView({ block: 'nearest', behavior: 'instant' });
     editing_id = id;
     draft = { ...annotation };
     selected_id = id;
     elements.comment_input.value = annotation.text;
     render_annotations();
     render_draft();
-    elements.comment_input.focus();
-    set_status('Vous pouvez aussi cliquer sur l’image pour repositionner ce repère.');
+    focus_comment_input();
+    set_status('');
 }
 
 function delete_annotation(id) {
     if (is_exporting) return;
+    if (draft && editing_id !== id) finish_draft();
     const index = annotations.findIndex((item) => item.id === id);
     annotations = annotations.filter((item) => item.id !== id);
     if (editing_id === id) cancel_draft();
@@ -149,7 +174,7 @@ function delete_annotation(id) {
     const next_row = elements.comments_list.children[Math.min(index, annotations.length - 1)];
     if (next_row) next_row.querySelector('.delete_button').focus({ preventScroll: true });
     else elements.image_surface.focus({ preventScroll: true });
-    set_status('Commentaire supprimé. Les repères ont été renumérotés.');
+    set_status('Commentaire supprimé.');
 }
 
 function begin_draft(annotation, focus = true) {
@@ -160,10 +185,7 @@ function begin_draft(annotation, focus = true) {
     draft = annotation;
     render_draft();
     update_controls();
-    if (focus) {
-        elements.comment_input.focus({ preventScroll: true });
-        elements.comment_form.scrollIntoView({ block: 'nearest' });
-    }
+    if (focus) focus_comment_input();
     set_status('');
 }
 
@@ -177,7 +199,7 @@ function set_tool(tool) {
     current_tool = tool;
     elements.point_button.setAttribute('aria-pressed', String(tool === 'point'));
     elements.area_button.setAttribute('aria-pressed', String(tool === 'area'));
-    elements.tool_hint.textContent = tool === 'point' ? 'Cliquez sur l’image pour placer un repère.' : 'Cliquez et glissez pour encadrer une zone.';
+    elements.tool_hint.textContent = tool === 'point' ? 'Cliquez pour commenter' : 'Glissez pour encadrer';
 }
 
 async function load_image(file) {
@@ -234,6 +256,7 @@ async function load_image(file) {
         render_annotations();
         elements.import_section.hidden = true;
         elements.workspace_section.hidden = false;
+        elements.app_shell.classList.add('workspace_open');
         if (previous_url) URL.revokeObjectURL(previous_url);
         if (export_url) URL.revokeObjectURL(export_url);
         export_url = null;
@@ -285,9 +308,7 @@ elements.cancel_button.addEventListener('click', () => {
     set_status('');
     elements.image_surface.focus({ preventScroll: true });
 });
-elements.comment_input.addEventListener('input', update_controls);
-elements.comment_form.addEventListener('submit', (event) => {
-    event.preventDefault();
+function save_annotation(focus = true) {
     const text = elements.comment_input.value.trim();
     if (!draft || !text || is_exporting) return;
     if (editing_id) {
@@ -297,15 +318,49 @@ elements.comment_form.addEventListener('submit', (event) => {
     }
     cancel_draft();
     render_annotations();
-    set_status('Commentaire enregistré. Ajoutez un autre repère ou exportez votre planche.');
-    elements.image_surface.focus({ preventScroll: true });
+    set_status('Commentaire enregistré.');
+    if (focus) elements.image_surface.focus({ preventScroll: true });
+}
+
+function finish_draft() {
+    if (!draft || is_exporting) return;
+    if (has_unsaved_text()) save_annotation(false);
+    else cancel_draft();
+}
+
+elements.comment_input.addEventListener('input', () => {
+    update_controls();
+    resize_comment_input();
+});
+elements.comment_form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    save_annotation();
 });
 elements.comment_input.addEventListener('keydown', (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
         event.preventDefault();
         elements.comment_form.requestSubmit();
     }
 });
+elements.delete_draft_button.addEventListener('click', () => {
+    if (editing_id) delete_annotation(editing_id);
+});
+
+document.addEventListener('pointerdown', (event) => {
+    if (draft && !elements.comment_popover.contains(event.target) && !elements.marker_layer.contains(event.target) && !elements.comments_list.contains(event.target)) finish_draft();
+}, true);
+
+document.addEventListener('focusin', (event) => {
+    if (draft && !pointer_start && !elements.comment_popover.contains(event.target) && event.target !== elements.image_surface && !elements.marker_layer.contains(event.target) && !elements.comments_list.contains(event.target)) finish_draft();
+});
+
+window.addEventListener('resize', position_popover);
+window.addEventListener('scroll', position_popover, true);
+window.visualViewport?.addEventListener('resize', position_popover);
+window.visualViewport?.addEventListener('scroll', position_popover);
+const popover_observer = new ResizeObserver(position_popover);
+popover_observer.observe(elements.comment_popover);
+popover_observer.observe(elements.image_surface);
 
 elements.image_surface.addEventListener('pointerdown', (event) => {
     if (is_exporting || event.button !== 0 || !event.isPrimary || event.target.closest('button') || pointer_start) return;
@@ -338,8 +393,7 @@ elements.image_surface.addEventListener('pointerup', (event) => {
             set_status('Glissez sur l’image pour dessiner une zone, ou utilisez le mode Point.', true);
         } else {
             update_controls();
-            elements.comment_input.focus({ preventScroll: true });
-            elements.comment_form.scrollIntoView({ block: 'nearest' });
+            focus_comment_input();
         }
     }
 });
@@ -353,7 +407,7 @@ elements.image_surface.addEventListener('keydown', (event) => {
     if (event.target !== elements.image_surface || is_exporting) return;
     if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        if (draft) elements.comment_input.focus();
+        if (draft) focus_comment_input();
         else begin_draft(current_tool === 'point' ? { type: 'point', x: 0.5, y: 0.5 } : { type: 'area', x: 0.35, y: 0.35, width: 0.3, height: 0.3 }, false);
     }
     const movements = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
@@ -403,10 +457,11 @@ document.addEventListener('drop', (event) => {
 window.addEventListener('blur', clear_drag_state);
 
 elements.export_button.addEventListener('click', async () => {
-    if (is_exporting || draft || !annotations.length) return;
+    finish_draft();
+    if (is_exporting || !annotations.length) return;
     is_exporting = true;
     render_annotations();
-    elements.export_button.textContent = 'Création du PNG…';
+    elements.export_button_label.textContent = 'Création…';
     set_status('Préparation de votre planche…');
     try {
         await elements.source_image.decode();
@@ -424,7 +479,7 @@ elements.export_button.addEventListener('click', async () => {
         set_status(error.message || 'Impossible de créer le PNG. Réessayez avec une image plus petite.', true);
     } finally {
         is_exporting = false;
-        elements.export_button.textContent = 'Exporter en PNG';
+        elements.export_button_label.textContent = 'Exporter le PNG';
         render_annotations();
     }
 });
