@@ -1,5 +1,7 @@
-node_modules/
-tests/artifacts/
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
+Desktop.ini
 *.log
+*.tmp
