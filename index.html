@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Annotez une image et exportez vos commentaires dans une planche PNG. Tout reste dans votre navigateur.">
+    <meta name="theme-color" content="#08090b">
+    <title>Image Notes</title>
+    <link rel="icon" type="image/svg+xml" href="website_icon.svg">
+    <link rel="preload" href="fonts/bricolage_grotesque.ttf" as="font" type="font/ttf" crossorigin>
+    <link rel="stylesheet" href="style.css">
+    <script src="png_export.js" defer></script>
+    <script src="script.js" defer></script>
+</head>
+<body>
+    <div class="app_shell">
+        <header class="topbar">
+            <h1>Image Notes<span class="title_dot">.</span></h1>
+        </header>
+        <main>
+            <input type="file" id="file_input" class="visually_hidden" accept="image/png,image/jpeg,image/webp,image/avif,image/gif,image/bmp" tabindex="-1">
+            <section id="import_section" aria-label="Importer une image">
+                <button id="drop_zone" class="drop_zone" type="button">
+                    <svg class="drop_icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>
+                    <span class="drop_title">Glissez votre image ici</span>
+                    <span class="drop_hint">ou cliquez pour la choisir</span>
+                    <span class="format_hint">PNG, JPG, WebP, AVIF, GIF, BMP · 30 Mo max.</span>
+                </button>
+            </section>
+            <p id="live_status" class="status_message" role="status" aria-live="polite"></p>
+            <section id="workspace_section" hidden aria-label="Éditeur d’annotations">
+                <div class="document_bar">
+                    <div class="file_details"><span class="file_label">IMAGE</span><h2 id="file_name"></h2><span id="file_dimensions" class="muted"></span></div>
+                    <button id="replace_button" class="text_button" type="button">Changer d’image</button>
+                </div>
+                <div class="editor_toolbar">
+                    <div class="tool_group" role="group" aria-label="Type de repère">
+                        <button id="point_button" class="tool_button" type="button" aria-pressed="true"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg>Point</button>
+                        <button id="area_button" class="tool_button" type="button" aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="5" y="5" width="14" height="14" rx="2" stroke-dasharray="4 3"/></svg>Zone</button>
+                    </div>
+                    <p id="tool_hint">Cliquez sur l’image pour placer un repère.</p>
+                    <span id="marker_count" class="marker_count">0 repère</span>
+                </div>
+                <div id="image_stage" class="image_stage">
+                    <div id="image_surface" class="image_surface" tabindex="0" role="group" aria-label="Image à annoter" aria-describedby="keyboard_hint">
+                        <img id="source_image" alt="Image à annoter" draggable="false">
+                        <div id="marker_layer" class="marker_layer"></div>
+                        <div id="draft_marker" class="annotation_marker draft_marker" hidden><span class="marker_badge">+</span></div>
+                    </div>
+                </div>
+                <p id="keyboard_hint" class="visually_hidden">Entrée pour placer un repère au centre. Flèches pour déplacer le repère en cours. Échap pour annuler. En mode Zone, glissez pour encadrer un détail.</p>
+                <section class="comments_section" aria-labelledby="comments_title">
+                    <div class="section_heading"><h2 id="comments_title">Commentaires <span id="comment_count">00</span></h2><span class="section_hint">Les numéros relient chaque retour à son emplacement.</span></div>
+                    <form id="comment_form" class="comment_form">
+                        <div class="composer_label"><span id="composer_number" class="number_badge">+</span><label id="comment_label" for="comment_input">Sélectionnez un endroit sur l’image</label><button id="cancel_button" class="text_button" type="button" hidden>Annuler</button></div>
+                        <textarea id="comment_input" rows="3" maxlength="1200" placeholder="Votre commentaire, juste ici…" disabled required></textarea>
+                        <div class="composer_footer"><span id="character_count" class="muted">0 / 1 200</span><button id="save_button" class="button primary_button" type="submit" disabled>Ajouter le commentaire <span aria-hidden="true">↗</span></button></div>
+                    </form>
+                    <div id="comments_list" class="comments_list"></div>
+                    <p id="empty_comments" class="empty_comments">Votre premier retour commence par un clic sur l’image.</p>
+                </section>
+                <div class="export_bar"><div><h2>Export</h2><p>L’image, ses repères et vos commentaires dans un seul PNG.</p></div><button id="export_button" class="button primary_button" type="button" disabled><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v12m-5-5 5 5 5-5M5 21h14"/></svg>Exporter en PNG</button></div>
+            </section>
+        </main>
+        <footer class="page_footer"><span class="privacy_dot" aria-hidden="true"></span> Vos images restent dans votre navigateur.</footer>
+    </div>
+    <dialog id="export_dialog" class="export_dialog" aria-labelledby="export_title">
+        <div class="dialog_header"><h2 id="export_title">Aperçu du PNG</h2><button id="close_export_button" class="close_button" aria-label="Fermer l’aperçu" type="button">×</button></div>
+        <div class="export_preview"><img id="export_image" alt="Planche PNG avec l’image annotée et les commentaires numérotés"></div>
+        <div class="dialog_footer"><p id="export_dimensions" class="muted"></p><a id="download_link" class="button primary_button" download="image_notes.png">Télécharger le PNG <span aria-hidden="true">↓</span></a></div>
+    </dialog>
+    <dialog id="replace_dialog" class="confirm_dialog" aria-labelledby="replace_title"><h2 id="replace_title">Changer d’image ?</h2><p>L’image et les commentaires actuels seront retirés. Pensez à exporter votre planche pour les conserver.</p><div class="confirm_actions"><button id="cancel_replace_button" class="button secondary_button" type="button">Garder cette image</button><button id="confirm_replace_button" class="button primary_button" type="button">Changer d’image</button></div></dialog>
+    <template id="comment_template"><article class="comment_row"><button type="button" class="comment_location" title="Voir le repère sur l’image"><span class="number_badge"></span></button><div><span class="comment_type"></span><p class="comment_text"></p></div><div class="comment_actions"><button type="button" class="row_button edit_button" title="Modifier le commentaire" aria-label="Modifier le commentaire"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m14 5 5 5M4 20l5-1L20 8a2.1 2.1 0 0 0-4-4L5 15z"/></svg></button><button type="button" class="row_button delete_button" title="Supprimer le commentaire" aria-label="Supprimer le commentaire"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7"/></svg></button></div></article></template>
+</body>
+</html>
